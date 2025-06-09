@@ -142,6 +142,12 @@ def RaiseSpecialOpsPass :
   let summary = "Raises special ops like softmax to the high level linalg.ext representation.";
 }
 
+def RaiseToAffineOpsPass :
+    Pass<"iree-global-opt-raise-to-affine", ""> {
+  let summary = "Raises index related ops to affine.apply ops.";
+  let dependentDialects = ["::mlir::affine::AffineDialect"];
+}
+
 def RemoveZeroExtentTensorsPass :
     InterfacePass<"iree-global-opt-remove-zero-extent-tensors", "mlir::FunctionOpInterface"> {
   let summary = "Removes tensors that have 0-extents.";

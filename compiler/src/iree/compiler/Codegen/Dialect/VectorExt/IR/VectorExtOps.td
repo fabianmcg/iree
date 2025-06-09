@@ -7,11 +7,14 @@
 #ifndef IREE_DIALECT_VECTOREXT_OPS
 #define IREE_DIALECT_VECTOREXT_OPS
 
+include "mlir/Dialect/Vector/Interfaces/MaskableOpInterface.td"
+include "mlir/Interfaces/DestinationStyleOpInterface.td"
 include "mlir/Interfaces/VectorInterfaces.td"
 include "iree/compiler/Codegen/Dialect/VectorExt/IR/VectorExtBase.td"
 include "iree/compiler/Codegen/Dialect/VectorExt/IR/VectorExtAttrs.td"
 include "iree/compiler/Codegen/Dialect/VectorExt/IR/VectorExtInterfaces.td"
 include "mlir/IR/OpBase.td"
+include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
 //===----------------------------------------------------------------------===//
@@ -238,6 +241,215 @@ def IREEVectorExt_TransferGatherOp : IREEVectorExt_PureOp<"transfer_gather", [
   let hasCustomAssemblyFormat = 1;
   let hasFolder = 1;
   let hasVerifier = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// Vector parallel ops.
+//===----------------------------------------------------------------------===//
+
+def IREEVectorExt_IndexedReadOp : IREEVectorExt_PureOp<"indexed_read", [
+    AttrSizedOperandSegments,
+    DestinationStyleOpInterface,
+    DeclareOpInterfaceMethods<ConditionallySpeculatable>,
+    DeclareOpInterfaceMethods<MaskableOpInterface>,
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+    AllElementTypesMatch<["base", "result"]>,
+    OptionalTypesMatchWith<"mask type", "result", "mask", [{
+      VectorType::get(::llvm::cast<VectorType>($_self).getShape(),
+                      IntegerType::get($_self.getContext(), 1))
+    }]>,
+    OptionalTypesMatchWith<"passthrough type", "result", "passthrough", [{
+      $_self
+    }]>
+  ]> {
+  let summary = [{Vector indexed read operation.}];
+  let description = [{
+    ```mlir
+      // Regular transfer read with masking and broadcasting
+      %res = vector.indexed_read %buf[%i, %j]
+          affine_map<()[b, ii, jj] -> (ii, jj)>
+          mask %mask passthrough %val in_bounds [false, true] :
+          memref<?x?xf32> -> vector<4x4x4xf32>
+
+      // Permuted transfer read with masking and broadcasting
+      %res = vector.indexed_read %buf[%i, %j]
+          affine_map<()[b, jj, ii] -> (ii, jj)>
+          mask %mask passthrough %val in_bounds [true, false] :
+          memref<?x?xf32> -> vector<4x4x4xf32>
+
+      // Transfer gather with masking and broadcasting
+      %res = vector.indexed_read %buf[%i, %j] ins(%offsets)
+          affine_map<()[offset, b, ii, jj] -> (offset, jj)>
+          mask %mask passthrough %val in_bounds [false, true] :
+          memref<?x?xf32> -> vector<4x4x4xf32>
+
+      // Permuted transfer gather
+      %res = vector.indexed_read %buf[%i, %j] ins(%offsets)
+          affine_map<()[offset, jj, ii] -> (offset, jj)>
+          in_bounds [true, true] :
+          memref<?x?xf32> -> vector<4x4xf32>
+    ```
+  }];
+  let arguments = (ins
+    ConfinedType<AnyShaped, [HasRankPred, IsTensorOrMemRefTypePred], "shaped type with rank">:$base,
+    Variadic<Index>:$indices,
+    AffineMapAttr:$index_mapping,
+    Variadic<VectorOfNonZeroRankOf<[Index]>>:$dynamic_indices,
+    Optional<VectorOfNonZeroRankOf<[AnyType]>>:$passthrough,
+    Optional<VectorOfNonZeroRankOf<[I1]>>:$mask,
+    DenseBoolArrayAttr:$in_bounds
+  );
+  let results = (outs AnyVectorOfAnyRank:$result);
+  let assemblyFormat = [{
+    $base `[` $indices `]`
+    (`ins` `(` $dynamic_indices^ `)`)? $index_mapping
+    (`mask` $mask^ `passthrough` $passthrough)? `in_bounds` $in_bounds
+    attr-dict `:` type($base) `->` type($result)
+    custom<IndexedOp>(ref($dynamic_indices), type($dynamic_indices),
+                          ref(type($result)))  
+  }];
+  let hasVerifier = 1;
+  let extraClassDeclaration = [{
+    // MaskableOpInterface methods.
+    bool supportsPassthru() { return true; }
+
+    MutableOperandRange getDpsInitsMutable() {
+      return MutableOperandRange(getOperation(), /*start=*/0, /*length=*/0);
+    }
+  }];
+}
+
+def IREEVectorExt_IndexedWriteOp : IREEVectorExt_PureOp<"indexed_write", [
+    AttrSizedOperandSegments,
+    DestinationStyleOpInterface,
+    DeclareOpInterfaceMethods<ConditionallySpeculatable>,
+    DeclareOpInterfaceMethods<MaskableOpInterface>,
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+    AllElementTypesMatch<["base", "value_to_store"]>,
+    OptionalTypesMatchWith<"mask type", "value_to_store", "mask", [{
+      VectorType::get(::llvm::cast<VectorType>($_self).getShape(),
+                      IntegerType::get($_self.getContext(), 1))
+    }]>
+  ]> {
+  let summary = [{Vector indexed write operation.}];
+  let description = [{
+    ```mlir
+      // Regular transfer write with masking and broadcasting
+      vector.indexed_write %value, %buf[%b, %i, %j]
+          affine_map<()[ii, jj] -> (0, ii, jj)>
+          mask %mask in_bounds [false, true] :
+          vector<4x4xf32>, memref<?x?x?xf32>
+
+      // Permuted transfer write with masking and broadcasting
+      vector.indexed_write %value, %buf[%b, %i, %j]
+          affine_map<()[jj, ii] -> (0, ii, jj)>
+          mask %mask in_bounds [true, false] :
+          vector<4x4xf32>, memref<?x?x?xf32>
+
+      // Permuted transfer scatter
+      vector.indexed_write %value, %buf[%i, %j] ins(%offsets)
+          affine_map<()[offset, jj, ii] -> (offset, jj)>
+          in_bounds [true, true] :
+          vector<4x4xf32>, memref<?x?xf32>
+    ```
+  }];
+  let arguments = (ins
+    AnyVectorOfAnyRank:$value_to_store,
+    ConfinedType<AnyShaped, [HasRankPred, IsTensorOrMemRefTypePred], "shaped type with rank">:$base,
+    Variadic<Index>:$indices,
+    AffineMapAttr:$index_mapping,
+    Variadic<VectorOfNonZeroRankOf<[Index]>>:$dynamic_indices,
+    Optional<VectorOfNonZeroRankOf<[I1]>>:$mask,
+    DenseBoolArrayAttr:$in_bounds
+  );
+  let results = (outs Optional<AnyRankedTensor>:$result);
+  let assemblyFormat = [{
+    $value_to_store `,` $base `[` $indices `]`
+    (`ins` `(` $dynamic_indices^ `)`)? $index_mapping
+    (`mask` $mask^)? `in_bounds` $in_bounds
+    attr-dict `:` type($value_to_store) `,` type($base)
+    custom<IndexedOp>(ref($dynamic_indices), type($dynamic_indices),
+                          ref(type($value_to_store)))
+    custom<IndexedWriteOp>(ref(type($base)), type($result))
+  }];
+  let hasVerifier = 1;
+  let extraClassDeclaration = [{
+    // MaskableOpInterface methods.
+    bool supportsPassthru() { return true; }
+
+    MutableOperandRange getDpsInitsMutable() { return getBaseMutable(); }
+  }];
+}
+
+// def IREEVectorExt_ParallelOp : IREEVectorExt_PureOp<"parallel",
+//     [AffineScope, OpAsmOpInterface, RecursiveMemoryEffects, SingleBlock]> {
+//   let summary = [{Vector parallel operation.}];
+//   let description = [{
+//     ```mlir
+//       // Broadcast operation.
+//       #map = affine_map<(i, j) -> (j)>
+//       vector.parallel ins({%aV : f32} = {%a, #map}) : (vector<3xf32>) -> vector<4x3xf32> {
+//         yield %aV : f32
+//       }
+//       // LHS broadcast + add operation.
+//       #lhs_map = affine_map<(i, j) -> (j)>
+//       #rhs_map = affine_map<(i, j) -> (i, j)>
+//       vector.parallel 
+//         ins({%aV : f32} = {%a, #lhs_map}, {%bV : f32} = {%b, #rhs_map}) :
+//         (vector<3xf32>, vector<4x3xf32>) -> vector<4x3xf32> {
+//         %res = arith.addf %aV, %bV : f32
+//         yield %res : f32
+//       }
+//       // GPU MMA operation with parallel high-level encoding.
+//       #a_map = affine_map<(i, j) -> (i, j * 4)>
+//       #b_map = affine_map<(i, j) -> (j * 4, i)>
+//       #c_map = affine_map<(i, j) -> (i * 4, j)>
+//       #d_map = affine_map<(i, j) -> (i * 4, j)>
+//       vector.parallel ins(
+//           {%aV : vector<4xf16>, [1:1, 1:4]}  = {%a, #a_map},
+//           {%bV : vector<4xf16>, [1:4, 1:1]}  = {%b, #b_map},
+//           {%dV : vector<16xf32>, [4:4, 1:1]} = {%d, #d_map}
+//         ) iteration_space(2, 32) outs({#c_map, [4:4, 1:1]})
+//         : (vector<32x8xf16>, vector<8x32xf16>, vector<32x32xf32>) -> vector<32x32xf32> {
+//         %res = amdgpu.mfma %aV * %bV + %dV {k = 8 : i32, m = 32 : i32, n = 32 : i32} : vector<4xf16>, vector<4xf16>, vector<16xf32>
+//         yield %res : vector<16xf32>
+//       }
+//     ```
+//   }];
+//   let arguments = (ins
+//     Variadic<AnyVectorOfAnyRank>:$inputs,
+//     AffineMapArrayAttr:$indexing_maps,
+//     UnitProp:$is_atomic,
+//     OptionalAttr<TypedArrayAttrBase<I64ArrayAttr, "Array of ">>:$input_strides
+//   );
+//   let results = (outs Variadic<AnyVectorOfAnyRank>:$outputs);
+//   let regions = (region SizedRegion<1>:$body_region);
+//   let extraClassDeclaration = [{
+//     /// Returns the number of inputs.
+//     unsigned getNumIns();
+//     /// Returns the number of outputs.
+//     unsigned getNumOuts();
+//     /// Returns the number of iterators in the iteration space.
+//     unsigned getNumIterators();
+//     /// Returns the block arguments corresponding to the iterators.
+//     ArrayRef<BlockArgument> getIterators();
+//     /// Returns the block arguments corresponding to the input operands.
+//     ArrayRef<BlockArgument> getIns();
+//     /// Returns the corresponding input for the given operand.
+//     BlockArgument getInFor(OpOperand *operand);
+//     /// Returns the terminator of the parallel op.
+//     YieldOp getTerminator();
+//   }];
+//   let hasCustomAssemblyFormat = 1;
+//   let hasVerifier = 1;
+// }
+
+def IREEVectorExt_YieldOp : IREEVectorExt_PureOp<"yield", [
+    Pure, Terminator, ReturnLike
+  ]> {
+  let summary = [{Vector yield operation.}];
+  let arguments = (ins Variadic<AnyType>:$inputs);
+  let assemblyFormat = "$inputs attr-dict `:` type($inputs)";
 }
 
 #endif  // IREE_DIALECT_VECTOREXT_OPS

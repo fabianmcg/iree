@@ -61,6 +61,7 @@ iree_cc_library(
     "QuantizedConvToConv.cpp"
     "QuantizedMatmulToMatmul.cpp"
     "RaiseSpecialOps.cpp"
+    "RaiseToAffineOps.cpp"
     "RemoveZeroExtentTensors.cpp"
     "SimplifyPackUnpack.cpp"
     "Utils.cpp"

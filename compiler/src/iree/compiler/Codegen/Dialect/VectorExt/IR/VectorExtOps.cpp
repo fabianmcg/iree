@@ -9,6 +9,7 @@
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Utils/IndexingUtils.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
+#include "mlir/IR/TypeUtilities.h"
 
 using namespace mlir;
 using namespace mlir::iree_compiler::IREE::VectorExt;
@@ -653,6 +654,159 @@ void TransferGatherOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                                    MLIRContext *ctx) {
   results.add<FoldSingleElementIndexVec, FoldContigousGatherToTransferRead>(
       ctx);
+}
+
+//===----------------------------------------------------------------------===//
+// IndexedReadOp
+//===----------------------------------------------------------------------===//
+
+static ParseResult parseIndexedOp(OpAsmParser &parser,
+                                  ArrayRef<OpAsmParser::UnresolvedOperand> ins,
+                                  SmallVectorImpl<Type> &insTypes,
+                                  Type outType) {
+  auto vecTy = cast<VectorType>(outType);
+  // Set the types of the `ins`.
+  auto inTy =
+      VectorType::get(vecTy.getShape(), parser.getBuilder().getIndexType());
+  insTypes.assign(ins.size(), inTy);
+  return success();
+}
+
+static void printIndexedOp(OpAsmPrinter &printer, Operation *, ValueRange,
+                           TypeRange, Type) {
+  (void)printer;
+}
+
+LogicalResult IndexedReadOp::verify() {
+  unsigned baseRank = getBase().getType().getRank();
+  size_t numIndices = getIndices().size();
+  if (baseRank != numIndices) {
+    return emitError() << "expected `" << baseRank
+                       << "` number of indices, but got: `" << numIndices
+                       << "`";
+  }
+  AffineMap mapping = getIndexMapping();
+  if (mapping.getNumResults() != numIndices) {
+    return emitError() << "the number of results in the affine map must match "
+                          "the number of indices";
+  }
+  size_t totalNumIns = getType().getRank() + getDynamicIndices().size();
+  if (mapping.getNumInputs() != totalNumIns) {
+    return emitError()
+           << "the number of inputs in the affine map must match: the rank of "
+              "the output plus the number of dynamic indices";
+  }
+  if (getInBounds().size() != numIndices) {
+    return emitError() << "the number of elements in the `in_bounds` array "
+                          "must match the number of indices";
+  }
+  bool hasMask = getMask() != nullptr;
+  bool hasPasthrough = getPassthrough() != nullptr;
+  if (hasMask != hasPasthrough) {
+    return emitError() << "expected both `mask` and `pasthrough` operands";
+  }
+  bool isInBounds = llvm::all_of(getInBounds(), [](bool v) { return v; });
+  if (isInBounds && hasMask)
+    return emitError() << "expected no mask operand";
+  if (!isInBounds && !hasMask)
+    return emitError() << "expected `mask` and `pasthrough` operands";
+  return success();
+}
+
+Type IndexedReadOp::getExpectedMaskType() {
+  return VectorType::get(getType().getShape(),
+                         IntegerType::get(getContext(), 1));
+}
+
+void IndexedReadOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  if (llvm::isa<MemRefType>(getBase().getType()))
+    effects.emplace_back(MemoryEffects::Read::get(), &getBaseMutable(),
+                         SideEffects::DefaultResource::get());
+}
+
+Speculation::Speculatability IndexedReadOp::getSpeculatability() {
+  if (hasPureTensorSemantics())
+    return Speculation::Speculatable;
+  return Speculation::NotSpeculatable;
+}
+
+//===----------------------------------------------------------------------===//
+// IndexedWriteOp
+//===----------------------------------------------------------------------===//
+
+static ParseResult parseIndexedWriteOp(OpAsmParser &parser, Type baseTy,
+                                       Type &outTy) {
+  if (isa<RankedTensorType>(baseTy))
+    outTy = baseTy;
+  return success();
+}
+
+static void printIndexedWriteOp(OpAsmPrinter &printer, Operation *, Type,
+                                Type) {
+  (void)printer;
+}
+
+LogicalResult IndexedWriteOp::verify() {
+  ShapedType baseTy = getBase().getType();
+  if (Value res = getResult();
+      isa<RankedTensorType>(baseTy) && (!res || baseTy != res.getType())) {
+    return emitError() << "expected a tensor result equal to `base`";
+  }
+  unsigned baseRank = baseTy.getRank();
+  size_t numIndices = getIndices().size();
+  if (baseRank != numIndices) {
+    return emitError() << "expected `" << baseRank
+                       << "` number of indices, but got: `" << numIndices
+                       << "`";
+  }
+  AffineMap mapping = getIndexMapping();
+  if (mapping.getNumResults() != numIndices) {
+    return emitError() << "the number of results in the affine map must match "
+                          "the number of indices";
+  }
+  size_t vecRank = getValueToStore().getType().getRank();
+  if (vecRank > numIndices) {
+    return emitError() << "expected a value to store with rank less or equal "
+                          "to rank of the base";
+  }
+  size_t totalNumIns = vecRank + getDynamicIndices().size();
+  if (mapping.getNumInputs() != totalNumIns) {
+    return emitError()
+           << "the number of inputs in the affine map must match: the rank of "
+              "the value to store plus the number of dynamic indices";
+  }
+  if (getInBounds().size() != numIndices) {
+    return emitError() << "the number of elements in the `in_bounds` array "
+                          "must match the number of indices";
+  }
+  bool hasMask = getMask() != nullptr;
+  bool isInBounds = llvm::all_of(getInBounds(), [](bool v) { return v; });
+  if (isInBounds && hasMask)
+    return emitError() << "expected no mask operand";
+  if (!isInBounds && !hasMask)
+    return emitError() << "expected a `mask` operand";
+  return success();
+}
+
+Type IndexedWriteOp::getExpectedMaskType() {
+  return VectorType::get(getBase().getType().getShape(),
+                         IntegerType::get(getContext(), 1));
+}
+
+void IndexedWriteOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  if (llvm::isa<MemRefType>(getBase().getType()))
+    effects.emplace_back(MemoryEffects::Write::get(), &getValueToStoreMutable(),
+                         SideEffects::DefaultResource::get());
+}
+
+Speculation::Speculatability IndexedWriteOp::getSpeculatability() {
+  if (hasPureTensorSemantics())
+    return Speculation::Speculatable;
+  return Speculation::NotSpeculatable;
 }
 
 // clang-format off

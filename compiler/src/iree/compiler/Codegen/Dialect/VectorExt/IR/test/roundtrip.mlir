@@ -179,3 +179,47 @@ func.func @transfer_gather(%indices: vector<128xindex>,
 
 // CHECK-LABEL: func.func @transfer_gather
 // CHECK: iree_vector_ext.transfer_gather
+
+// -----
+
+// CHECK-LABEL: func.func @indexed_ops
+func.func @indexed_ops(%buf0: memref<?x?xf32>, %buf1: memref<?x?x?xf32>,
+    %b: index, %i: index, %j: index, %mask0: vector<4x4x4xi1>,
+    %mask1: vector<4x4xi1>, %val: vector<4x4x4xf32>,
+    %offsets0: vector<4x4x4xindex>, %offsets1: vector<4x4xindex>) {
+  %v0 = iree_vector_ext.indexed_read %buf0[%i, %j]
+      affine_map<()[b, ii, jj] -> (ii, jj)>
+      mask %mask0 passthrough %val in_bounds [false, true] :
+      memref<?x?xf32> -> vector<4x4x4xf32>
+
+  %v1 = iree_vector_ext.indexed_read %buf0[%i, %j]
+      affine_map<()[b, jj, ii] -> (ii, jj)>
+      mask %mask0 passthrough %val in_bounds [true, false] :
+      memref<?x?xf32> -> vector<4x4x4xf32>
+
+  %v2 = iree_vector_ext.indexed_read %buf0[%i, %j] ins(%offsets0)
+      affine_map<()[offset, b, ii, jj] -> (offset, jj)>
+      mask %mask0 passthrough %val in_bounds [false, true] :
+      memref<?x?xf32> -> vector<4x4x4xf32>
+
+  %v3 = iree_vector_ext.indexed_read %buf0[%i, %j] ins(%offsets1)
+      affine_map<()[offset, jj, ii] -> (offset, jj)>
+      in_bounds [true, true] :
+      memref<?x?xf32> -> vector<4x4xf32>
+      
+  iree_vector_ext.indexed_write %v3, %buf1[%b, %i, %j]
+      affine_map<()[ii, jj] -> (0, ii, jj)>
+      mask %mask1 in_bounds [false, true, true] :
+      vector<4x4xf32>, memref<?x?x?xf32>
+
+  iree_vector_ext.indexed_write %v3, %buf1[%b, %i, %j]
+      affine_map<()[jj, ii] -> (0, ii, jj)>
+      mask %mask1 in_bounds [true, false, true] :
+      vector<4x4xf32>, memref<?x?x?xf32>
+
+  iree_vector_ext.indexed_write %v3, %buf0[%i, %j] ins(%offsets1)
+      affine_map<()[offset, jj, ii] -> (offset, jj)>
+      in_bounds [true, true] :
+      vector<4x4xf32>, memref<?x?xf32>
+  return
+}
