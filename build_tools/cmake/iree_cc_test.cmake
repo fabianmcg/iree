@@ -115,6 +115,12 @@ function(iree_cc_test)
 
   list(TRANSFORM _RULE_DEPS REPLACE "^::" "${_PACKAGE_NS}::")
 
+  if(IREE_ENABLE_MLIR_DYLIB)
+    set_mlir_link_libraries(${_NAME} _RULE_DEPS ${_RULE_DEPS})
+    set_mlir_c_link_libraries(${_NAME} _RULE_DEPS ${_RULE_DEPS})
+    list(APPEND _RULE_DEPS "MLIR;MLIR-C")
+  endif()
+  iree_redirect_llvm_dylib_deps(_RULE_DEPS)
   target_link_libraries(${_NAME}
     PUBLIC
       ${_RULE_DEPS}

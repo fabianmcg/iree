@@ -91,7 +91,6 @@ function(iree_install_targets)
         FILES "${_hdr_abs_path}"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${_rel_path}"
         COMPONENT "${_INSTALL_COMPONENT}"
-        EXCLUDE_FROM_ALL
       )
     endforeach()
   endif()

@@ -66,7 +66,9 @@ iree_cc_library(
 # library by populating the IREE_COMPILER_API_ADDL_EXPORT_OBJECTS.
 ################################################################################
 
-set(_EXPORT_OBJECT_LIBS
+if(NOT IREE_ENABLE_MLIR_DYLIB)
+set(
+  _LLVM_EXPORT_OBJECT_LIBS
   obj.IREEDialectsCAPI
   obj.MLIRCAPIDebug
   obj.MLIRCAPIIR
@@ -78,6 +80,11 @@ set(_EXPORT_OBJECT_LIBS
   obj.MLIRCAPITransforms
   obj.MLIRCAPITransformDialect
   obj.MLIRCAPITransformDialectTransforms
+)
+endif()
+
+set(_EXPORT_OBJECT_LIBS
+  ${_LLVM_EXPORT_OBJECT_LIBS}
   iree_compiler_API_Internal_CompilerDriver.objects
   iree_compiler_API_Internal_IREECompileToolEntryPoint.objects
   iree_compiler_API_Internal_IREECodegenDialectCAPI.objects
@@ -151,6 +158,10 @@ endforeach()
 # library structures.
 set(CMAKE_PLATFORM_NO_VERSIONED_SONAME ON)
 
+if(IREE_ENABLE_MLIR_DYLIB)
+  set(_LLVM_DYLIBS LLVM MLIR MLIR-C)
+endif()
+
 iree_cc_library(
   SHARED
   NAME
@@ -163,6 +174,7 @@ iree_cc_library(
     $<$<PLATFORM_ID:Linux>:-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/api_version.ld>
   DEPS
     iree::compiler::bindings::c::headers
+    ${_LLVM_DYLIBS}
 )
 
 # Make sure that re-link if extra linker inputs change.

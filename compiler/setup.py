@@ -252,6 +252,8 @@ def prepare_installation():
     if not IS_CONFIGURED:
         # Build from source tree.
         subprocess.check_call(["cmake", "--version"])
+        llvmPath = subprocess.check_output(["llvm", "--cmake-path"]).decode("utf-8").strip()
+        os.environ["CMAKE_PREFIX_PATH"] = llvmPath
         os.makedirs(IREE_BINARY_DIR, exist_ok=True)
         maybe_nuke_cmake_cache()
         print(f"CMake build dir: {IREE_BINARY_DIR}", file=sys.stderr)
@@ -262,6 +264,13 @@ def prepare_installation():
             "-DIREE_BUILD_PYTHON_BINDINGS=ON",
             "-DIREE_BUILD_SAMPLES=OFF",
             "-DIREE_BUILD_TESTS=OFF",
+            "-DIREE_BUILD_BUNDLED_LLVM=OFF",
+            "-DIREE_ENABLE_MLIR_DYLIB=ON",
+            "-DCMAKE_PREFIX_PATH={}".format(llvmPath),
+            "-DIREE_DEV_MODE=ON",
+            "-DIREE_ENABLE_ASSERTIONS=ON",
+            "-DIREE_ENABLE_SPLIT_DWARF=ON",
+            "-DIREE_ENABLE_THIN_ARCHIVES=ON",
             # Disable .so.0 style symlinking. Python wheels don't preserve links,
             # so this ~doubles the binary size if not disabled (yikes!).
             "-DCMAKE_PLATFORM_NO_VERSIONED_SONAME=ON",
@@ -335,12 +344,17 @@ class CMakeBuildPy(_build_py):
         target_dir = os.path.abspath(self.build_lib)
         print(f"Building in target dir: {target_dir}", file=sys.stderr)
         os.makedirs(target_dir, exist_ok=True)
-        print("Copying install to target.", file=sys.stderr)
+        print(f"Copying install to target: {target_dir}", file=sys.stderr)
         if os.path.exists(target_dir):
             shutil.rmtree(target_dir)
         shutil.copytree(
             os.path.join(CMAKE_INSTALL_DIR_ABS, "python_packages", "iree_compiler"),
             target_dir,
+            symlinks=self.editable_mode,
+        )
+        shutil.copytree(
+            os.path.join(CMAKE_INSTALL_DIR_ABS, "include"),
+            os.path.join(target_dir, "iree", "include"),
             symlinks=self.editable_mode,
         )
         print("Target populated.", file=sys.stderr)
@@ -481,13 +495,10 @@ setup(
         "documentation": "https://iree.dev/reference/bindings/python/",
     },
     ext_modules=[
-        CMakeExtension("iree.compiler._mlir_libs._mlir"),
         CMakeExtension("iree.compiler._mlir_libs._ireeDialects"),
         # TODO: MHLO has been broken for a while so disabling. If re-enabling,
         # it also needs to be enabled on the build side.
         # CMakeExtension("iree.compiler._mlir_libs._mlirHlo"),
-        CMakeExtension("iree.compiler._mlir_libs._mlirLinalgPasses"),
-        CMakeExtension("iree.compiler._mlir_libs._mlirGPUPasses"),
         CMakeExtension("iree.compiler._mlir_libs._site_initialize_0"),
     ],
     cmdclass={

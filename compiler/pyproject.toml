@@ -8,5 +8,8 @@ requires = [
     "numpy",
     "packaging",
     "sympy",
+    "llvm",
+    "pybind11",
+    "nanobind"
 ]
 build-backend = "setuptools.build_meta"

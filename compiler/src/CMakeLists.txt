@@ -6,8 +6,10 @@
 
 iree_setup_c_src_root(
   IMPLICIT_DEFS_TARGET iree_compiler_defs
-  IMPLICIT_DEFS_INSTALL_COMPONENT IREERuntimeLibraries-Compiler
+  IMPLICIT_DEFS_INSTALL_COMPONENT IREEDevLibraries-CompilerDefs
   IMPLICIT_DEFS_EXPORT_SET Compiler
+  DEFAULT_EXPORT_SET CompilerDefs
+  DEFAULT_INSTALL_COMPONENT IREEDevLibraries-CompilerDefs
 )
 
 add_subdirectory(iree/compiler)

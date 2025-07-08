@@ -49,6 +49,7 @@ include(CMakeDependentOption)
 #-------------------------------------------------------------------------------
 # Project component configuration
 #-------------------------------------------------------------------------------
+option(IREE_ENABLE_MLIR_DYLIB "Enable MLIR-IREE DYLIB build" OFF)
 
 option(IREE_ENABLE_RUNTIME_TRACING "Enables instrumented runtime tracing." OFF)
 option(IREE_ENABLE_COMPILER_TRACING "Enables instrumented compiler tracing." OFF)
@@ -885,8 +886,9 @@ else()
   # libraries set their right usage requirements for includes. In the meantime
   # we add usage requirements to libraries at the root of all things LLVM.
   iree_llvm_add_usage_requirements(LLVMSupport IREELLVMIncludeSetup)
+  if (NOT IREE_ENABLE_MLIR_DYLIB)
   iree_llvm_add_usage_requirements(MLIRSupport IREELLVMIncludeSetup)
-
+  endif()
   # Add external projects.
 
   message(STATUS "Configuring llvm-external-projects/mlir-iree-dialects")
@@ -1297,6 +1299,12 @@ if(IREE_BUILD_COMPILER)
       iree-install-runtime-libraries
       iree-install-tools-compiler
       iree-install-dev-libraries-compiler
+  )
+
+  iree_add_install_target(
+    NAME iree-install-dev-all
+    COMPONENT IREEDevLibraries-CompilerDefs
+    ADD_TO iree-install-dev-libraries
   )
 endif()
 

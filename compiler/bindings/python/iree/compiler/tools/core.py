@@ -194,8 +194,8 @@ def build_compile_command_line(
 
     # Tool paths.
     if "llvm-cpu" in options.target_backends:
-        lld_path = find_tool("iree-lld")
-        cl.append(f"--iree-llvmcpu-embedded-linker-path={lld_path}")
+        # lld_path = find_tool("iree-lld")
+        cl.append(f"--iree-llvmcpu-embedded-linker-path=lld")
 
     # MLIR flags.
     if options.output_mlir_debuginfo:

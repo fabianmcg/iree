@@ -65,7 +65,7 @@ this_dir="$(cd $(dirname $0) && pwd)"
 script_name="$(basename $0)"
 repo_root=$(cd "${this_dir}" && find_git_dir_parent)
 manylinux_docker_image="${manylinux_docker_image:-$(uname -m | awk '{print ($1 == "aarch64") ? "quay.io/pypa/manylinux_2_28_aarch64" : "ghcr.io/iree-org/manylinux_x86_64@sha256:2e0246137819cf10ed84240a971f9dd75cc3eb62dc6907dfd2080ee966b3c9f4" }')}"
-python_versions="${override_python_versions:-cp39-cp39 cp310-cp310 cp311-cp311 cp312-cp312 cp313-cp313 cp313-cp313t}"
+python_versions="${override_python_versions:-cp311-cp311}"
 output_dir="${output_dir:-${this_dir}/wheelhouse}"
 packages="${packages:-iree-base-runtime iree-base-compiler}"
 package_suffix="${package_suffix:-}"
@@ -129,12 +129,14 @@ function run_in_docker() {
       prepare_python
       # replace dashes with underscores
       package_suffix="${package_suffix//-/_}"
+      export PIP_EXTRA_INDEX_URL=https://github.com/brium/python-wheels/releases/expanded_assets/latest
+      pip config set global.extra-index-url https://github.com/brium/python-wheels/releases/expanded_assets/latest
       case "${package}" in
         iree-base-runtime)
-          clean_wheels "iree_base_runtime${package_suffix}" "${python_version}"
-          install_deps "iree_base_runtime${package_suffix}" "${python_version}"
-          build_iree_runtime
-          run_audit_wheel "iree_base_runtime${package_suffix}" "${python_version}"
+          # clean_wheels "iree_base_runtime${package_suffix}" "${python_version}"
+          # install_deps "iree_base_runtime${package_suffix}" "${python_version}"
+          # build_iree_runtime
+          # run_audit_wheel "iree_base_runtime${package_suffix}" "${python_version}"
           ;;
         iree-base-compiler)
           clean_wheels "iree_base_compiler${package_suffix}" "${python_version}"
@@ -177,7 +179,7 @@ function run_audit_wheel() {
   generic_wheel="$(echo "${output_dir}/${wheel_basename}-"*"-${python_version}-linux_$(uname -m).whl")"
   ls "${generic_wheel}"
   echo ":::: Auditwheel ${generic_wheel}"
-  auditwheel repair -w "${output_dir}" "${generic_wheel}"
+  auditwheel repair -w "${output_dir}" "${generic_wheel}" --exclude libLLVM.so.21.0git --exclude libMLIR.so.21.0git --exclude libMLIR-C.so.21.0git
   rm -v "${generic_wheel}"
 }
 

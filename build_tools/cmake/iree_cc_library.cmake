@@ -105,6 +105,13 @@ function(iree_cc_library)
     return()
   endif()
 
+  if(MLIR_FOUND)
+    if(IREE_ENABLE_MLIR_DYLIB)
+      set_mlir_link_libraries(stub _RULE_DEPS ${_RULE_DEPS})
+      set_mlir_c_link_libraries(stub _RULE_DEPS ${_RULE_DEPS})
+    endif()
+  endif()
+
   # Prefix the library with the package name, so we get: iree_package_name.
   if(_RULE_PACKAGE)
     set(_PACKAGE_NS "${_RULE_PACKAGE}")
@@ -306,9 +313,10 @@ function(iree_cc_library)
   endif()
 
   if(NOT _RULE_TESTONLY)
+    file(GLOB td_list RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "*.td")
     iree_install_targets(
       TARGETS ${_NAME}
-      HDRS ${_RULE_HDRS} ${_RULE_TEXTUAL_HDRS}
+      HDRS ${_RULE_HDRS} ${_RULE_TEXTUAL_HDRS} ${td_list}
     )
   endif()
 
