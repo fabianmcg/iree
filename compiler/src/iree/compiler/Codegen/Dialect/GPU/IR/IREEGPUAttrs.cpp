@@ -40,8 +40,6 @@
 #define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
 
 #include "iree/compiler/Codegen/Dialect/GPU/IR/IREEGPUEnums.cpp.inc"
-#define GET_ATTRDEF_CLASSES
-#include "iree/compiler/Codegen/Dialect/GPU/IR/IREEGPUAttrs.cpp.inc"
 
 namespace mlir::iree_compiler::IREE::GPU {
 
@@ -763,6 +761,26 @@ LogicalResult MMAAttr::populateOperandOffsetsSizesStrides(
   sizes.append(canonicalSizes);
 
   return success();
+}
+
+//===----------------------------------------------------------------------===//
+// MmaScheduleAttr
+//===----------------------------------------------------------------------===//
+
+static ParseResult parseSubgroupBasis(AsmParser &parser,
+                                      SmallVector<int64_t> &basis) {
+  if (parser.parseLSquare())
+    return failure();
+  FailureOr<SmallVector<int64_t>> arr =
+      FieldParser<SmallVector<int64_t>>::parse(parser);
+  if (failed(arr) || parser.parseRSquare())
+    return failure();
+  basis = std::move(*arr);
+  return success();
+}
+
+static void printSubgroupBasis(AsmPrinter &printer, ArrayRef<int64_t> basis) {
+  printer << "[" << basis << "]";
 }
 
 //===----------------------------------------------------------------------===//
@@ -1854,3 +1872,6 @@ void IREEGPUDialect::registerAttributes() {
 }
 
 } // namespace mlir::iree_compiler::IREE::GPU
+
+#define GET_ATTRDEF_CLASSES
+#include "iree/compiler/Codegen/Dialect/GPU/IR/IREEGPUAttrs.cpp.inc"

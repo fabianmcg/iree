@@ -418,11 +418,24 @@ def IREEGPU_MmaScheduleAttr : AttrDef<IREEGPU_Dialect, "MMASchedule"> {
 
   let parameters = (ins
     "::mlir::iree_compiler::IREE::Codegen::InnerTileDescAttrInterface":$intrinsic,
-    "int64_t":$subgroup_m_count,
-    "int64_t":$subgroup_n_count
+    ArrayRefParameter<"int64_t", "subgroup basis">:$subgroup_basis
   );
-
-  let assemblyFormat = "`<` struct(params) `>`";
+  let builders = [
+    AttrBuilder<(ins
+      "::mlir::iree_compiler::IREE::Codegen::InnerTileDescAttrInterface":$intrinsic,
+      "int64_t":$m, "int64_t":$n), [{
+        return $_get($_ctxt, intrinsic, ArrayRef<int64_t>({m, n}));
+    }]>
+  ];
+  let assemblyFormat = "`<` struct($intrinsic, custom<SubgroupBasis>($subgroup_basis) ) `>`";
+  let extraClassDeclaration = [{
+    int64_t getSubgroupMCount() const {
+      return getSubgroupBasis()[0];
+    }
+    int64_t getSubgroupNCount() const {
+      return getSubgroupBasis()[1];
+    }
+  }];
 }
 
 //===----------------------------------------------------------------------===//
