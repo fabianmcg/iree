@@ -11,6 +11,7 @@
 iree_add_all_subdirs()
 
 iree_cc_library(
+  EXCLUDE_FROM_LIBIREE
   NAME
     StaticImpl
   DEPS
@@ -66,7 +67,9 @@ iree_cc_library(
 # library by populating the IREE_COMPILER_API_ADDL_EXPORT_OBJECTS.
 ################################################################################
 
-set(_EXPORT_OBJECT_LIBS
+if(NOT IREE_ENABLE_MLIR_DYLIB)
+set(
+  _LLVM_EXPORT_OBJECT_LIBS
   obj.IREEDialectsCAPI
   obj.MLIRCAPIDebug
   obj.MLIRCAPIIR
@@ -78,15 +81,26 @@ set(_EXPORT_OBJECT_LIBS
   obj.MLIRCAPITransforms
   obj.MLIRCAPITransformDialect
   obj.MLIRCAPITransformDialectTransforms
-  iree_compiler_API_Internal_CompilerDriver.objects
-  iree_compiler_API_Internal_IREECompileToolEntryPoint.objects
-  iree_compiler_API_Internal_IREECodegenDialectCAPI.objects
-  iree_compiler_API_Internal_IREEGPUDialectCAPI.objects
-  iree_compiler_API_Internal_IREEMLIRLSPServerToolEntryPoint.objects
-  iree_compiler_API_Internal_IREEOptToolEntryPoint.objects
-  iree_compiler_API_Internal_IREEReduceToolEntryPoint.objects
-  iree_compiler_API_Internal_LLDToolEntryPoint.objects
 )
+endif()
+
+# set(_EXPORT_OBJECT_LIBS
+#   ${_LLVM_EXPORT_OBJECT_LIBS}
+#   iree_compiler_API_Internal_CompilerDriver.objects
+#   iree_compiler_API_Internal_IREECompileToolEntryPoint.objects
+#   iree_compiler_API_Internal_IREECodegenDialectCAPI.objects
+#   iree_compiler_API_Internal_IREEGPUDialectCAPI.objects
+#   iree_compiler_API_Internal_IREEMLIRLSPServerToolEntryPoint.objects
+#   iree_compiler_API_Internal_IREEOptToolEntryPoint.objects
+#   iree_compiler_API_Internal_IREEReduceToolEntryPoint.objects
+#   iree_compiler_API_Internal_LLDToolEntryPoint.objects
+# )
+
+get_property(_EXPORT_OBJECT_LIBS GLOBAL PROPERTY LIBIREE_OBJECTS)
+
+list(REMOVE_ITEM _EXPORT_OBJECT_LIBS "iree_compiler_bindings_c_loader.objects")
+
+message(WARNING "LIBIREE Objects: ${_EXPORT_OBJECT_LIBS}")
 
 if(DEFINED IREE_COMPILER_API_ADDL_EXPORT_OBJECTS)
   message(STATUS "Bundling additional exports into libIREECompiler.so: ${IREE_COMPILER_API_ADDL_EXPORT_OBJECTS}")
@@ -151,8 +165,13 @@ endforeach()
 # library structures.
 set(CMAKE_PLATFORM_NO_VERSIONED_SONAME ON)
 
+if(IREE_ENABLE_MLIR_DYLIB)
+  set(_LLVM_DYLIBS LLVM MLIR MLIR-C)
+endif()
+
 iree_cc_library(
   SHARED
+  EXCLUDE_FROM_LIBIREE
   NAME
     SharedImpl
   SRCS
@@ -163,6 +182,7 @@ iree_cc_library(
     $<$<PLATFORM_ID:Linux>:-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/api_version.ld>
   DEPS
     iree::compiler::bindings::c::headers
+    ${_LLVM_DYLIBS}
 )
 
 # Make sure that re-link if extra linker inputs change.

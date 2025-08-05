@@ -95,7 +95,7 @@ endfunction()
 function(iree_cc_library)
   cmake_parse_arguments(
     _RULE
-    "PUBLIC;TESTONLY;SHARED;DISABLE_LLVM_LINK_LLVM_DYLIB"
+    "PUBLIC;TESTONLY;SHARED;DISABLE_LLVM_LINK_LLVM_DYLIB;EXCLUDE_FROM_LIBIREE"
     "PACKAGE;NAME;WINDOWS_DEF_FILE"
     "HDRS;TEXTUAL_HDRS;SRCS;COPTS;DEFINES;LINKOPTS;DATA;DEPS;INCLUDES;SYSTEM_INCLUDES"
     ${ARGN}
@@ -103,6 +103,13 @@ function(iree_cc_library)
 
   if(_RULE_TESTONLY AND NOT IREE_BUILD_TESTS)
     return()
+  endif()
+
+  if(MLIR_FOUND)
+    if(IREE_ENABLE_MLIR_DYLIB)
+      set_mlir_link_libraries(stub _RULE_DEPS ${_RULE_DEPS})
+      set_mlir_c_link_libraries(stub _RULE_DEPS ${_RULE_DEPS})
+    endif()
   endif()
 
   # Prefix the library with the package name, so we get: iree_package_name.
@@ -140,6 +147,10 @@ function(iree_cc_library)
     set(_RULE_IS_INTERFACE 1)
   else()
     set(_RULE_IS_INTERFACE 0)
+  endif()
+
+  if (NOT _RULE_EXCLUDE_FROM_LIBIREE AND NOT ${_RULE_IS_INTERFACE})
+    set_property(GLOBAL APPEND PROPERTY LIBIREE_OBJECTS ${_OBJECTS_NAME})
   endif()
 
   # Wrap user specified INCLUDES in the $<BUILD_INTERFACE:>
@@ -306,9 +317,10 @@ function(iree_cc_library)
   endif()
 
   if(NOT _RULE_TESTONLY)
+    file(GLOB td_list RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "*.td")
     iree_install_targets(
       TARGETS ${_NAME}
-      HDRS ${_RULE_HDRS} ${_RULE_TEXTUAL_HDRS}
+      HDRS ${_RULE_HDRS} ${_RULE_TEXTUAL_HDRS} ${td_list}
     )
   endif()
 

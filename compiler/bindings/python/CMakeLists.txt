@@ -201,12 +201,8 @@ declare_mlir_python_extension(IREECompilerPythonExtensions.CompilerDialects
 # Generate packages and shared library
 ################################################################################
 
-set(_SOURCE_COMPONENTS
-  # Local sources.
-  IREECompilerAPIPythonTools
-  IREECompilerPythonExtensions
-  IREEPythonSources
-
+if(NOT IREE_ENABLE_MLIR_DYLIB)
+set(_LLVM_DEPS
   MLIRPythonSources.Core
 
   # Core dialects.
@@ -234,10 +230,19 @@ set(_SOURCE_COMPONENTS
   MLIRPythonSources.Dialects.transform.interpreter
   MLIRPythonSources.Dialects.vector
   MLIRPythonSources.Dialects.vector_transform
+)
+endif()
+
+set(_SOURCE_COMPONENTS
+  # Local sources.
+  IREECompilerAPIPythonTools
+  IREECompilerPythonExtensions
+  IREEPythonSources
 
   # iree-dialects project.
   IREEDialectsPythonSources
   IREEDialectsPythonExtensions
+  ${_LLVM_DEPS}
 )
 
 add_mlir_python_modules(IREECompilerPythonModules

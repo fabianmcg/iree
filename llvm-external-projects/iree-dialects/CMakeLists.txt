@@ -54,9 +54,19 @@ endif()
 
 add_subdirectory(include)
 add_subdirectory(lib)
-add_subdirectory(test)
 add_subdirectory(tools)
 
 if(MLIR_ENABLE_BINDINGS_PYTHON)
   add_subdirectory(python)
 endif()
+
+install(DIRECTORY include/iree-dialects include/iree-dialects-c
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  COMPONENT iree-dialects-headers
+  FILES_MATCHING
+  PATTERN "*.def"
+  PATTERN "*.h"
+  PATTERN "*.inc"
+  PATTERN "*.td"
+  PATTERN "LICENSE.TXT"
+)

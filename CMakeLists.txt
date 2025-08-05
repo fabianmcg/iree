@@ -49,6 +49,7 @@ include(CMakeDependentOption)
 #-------------------------------------------------------------------------------
 # Project component configuration
 #-------------------------------------------------------------------------------
+option(IREE_ENABLE_MLIR_DYLIB "Enable MLIR-IREE DYLIB build" OFF)
 
 option(IREE_ENABLE_RUNTIME_TRACING "Enables instrumented runtime tracing." OFF)
 option(IREE_ENABLE_COMPILER_TRACING "Enables instrumented compiler tracing." OFF)
@@ -129,7 +130,7 @@ option(BUILD_SHARED_LIBS "Instructs CMake to build libraries as shared if possib
 set(IREE_RUNTIME_OPTIMIZATION_PROFILE "" CACHE STRING
     "Build optimization profile to apply. One of '', 'lto', 'size'.")
 set(IREE_LTO_MODE "full" CACHE STRING "LTO type, 'thin' or 'full'. Only consulted on clang-like compilers.")
-option(IREE_VISIBILITY_HIDDEN "Builds all C/C++ libraries with hidden visibility" ON)
+option(IREE_VISIBILITY_HIDDEN "Builds all C/C++ libraries with hidden visibility" OFF)
 
 #-------------------------------------------------------------------------------
 # Custom runtime allocator configuration
@@ -885,8 +886,9 @@ else()
   # libraries set their right usage requirements for includes. In the meantime
   # we add usage requirements to libraries at the root of all things LLVM.
   iree_llvm_add_usage_requirements(LLVMSupport IREELLVMIncludeSetup)
+  if (NOT IREE_ENABLE_MLIR_DYLIB)
   iree_llvm_add_usage_requirements(MLIRSupport IREELLVMIncludeSetup)
-
+  endif()
   # Add external projects.
 
   message(STATUS "Configuring llvm-external-projects/mlir-iree-dialects")
@@ -897,7 +899,7 @@ else()
   if(IREE_INPUT_STABLEHLO)
     message(STATUS "Configuring third_party/stablehlo")
     list(APPEND CMAKE_MESSAGE_INDENT "  ")
-    iree_llvm_add_external_project(stablehlo ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stablehlo)
+    iree_llvm_add_external_project(stablehlo ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stablehlo EXCLUDE_FROM_ALL)
     list(POP_BACK CMAKE_MESSAGE_INDENT)
   endif()
 
@@ -1297,6 +1299,12 @@ if(IREE_BUILD_COMPILER)
       iree-install-runtime-libraries
       iree-install-tools-compiler
       iree-install-dev-libraries-compiler
+  )
+
+  iree_add_install_target(
+    NAME iree-install-dev-all
+    COMPONENT IREEDevLibraries-CompilerDefs
+    ADD_TO iree-install-dev-libraries
   )
 endif()
 

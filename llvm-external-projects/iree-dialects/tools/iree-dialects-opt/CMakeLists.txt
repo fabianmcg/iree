@@ -30,6 +30,7 @@ set(LIBS
   MLIRTransformPDLExtension
   MLIRVectorTransformOps
 )
+set_mlir_link_libraries(iree-dialects-opt LIBS ${LIBS})
 
 add_llvm_executable(iree-dialects-opt
   iree-dialects-opt.cpp

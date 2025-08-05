@@ -268,11 +268,23 @@ endmacro()
 # The project binary dir will be llvm-external-projects/${name}
 # Call this after appropriate LLVM/MLIR packages have been loaded.
 function(iree_llvm_add_external_project name location)
+  cmake_parse_arguments(
+    _RULE
+    "EXCLUDE_FROM_ALL"
+    ""
+    ""
+    ${ARGN}
+  )
+
   message(STATUS "Adding LLVM external project ${name} -> ${location}")
   if(NOT EXISTS "${location}/CMakeLists.txt")
     message(FATAL_ERROR "External project location ${location} is not valid")
   endif()
-  add_subdirectory(${location} "llvm-external-projects/${name}" EXCLUDE_FROM_ALL)
+  if (_RULE_EXCLUDE_FROM_ALL)
+    add_subdirectory(${location} "llvm-external-projects/${name}" EXCLUDE_FROM_ALL)
+  else()
+    add_subdirectory(${location} "llvm-external-projects/${name}")
+  endif()
 endfunction()
 
 # iree_llvm_add_usage_requirements(llvm_library usage_library)
