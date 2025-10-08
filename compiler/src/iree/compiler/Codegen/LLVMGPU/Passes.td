@@ -128,6 +128,26 @@ def LLVMGPUVectorToGPUPass :
   let summary = "Pass to convert vector to gpu.";
 }
 
+def PoseidonInlineKernel : Pass<"iree-poseidon-inline-kernel", "::mlir::ModuleOp"> {
+  let summary = "Pass to inline poseidon kernels into their parent module.";
+  let options = [
+    Option<"use32BitIndex", "use-32-bit-index", "bool", "false",
+           "Use 32 bit index type">
+  ];
+}
+
+def PoseidonOutlineForall : Pass<"iree-poseidon-outline-forall"> {
+  let summary = "Pass to outline scf.forall ops into separate functions.";
+}
+
+def PoseidonPipeline : Pass<"iree-poseidon-pipeline", "::mlir::ModuleOp"> {
+  let summary = "Poseidon CodeGen pipeline";
+}
+
+def PoseidonEpilogue : Pass<"iree-poseidon-epilogue", "::mlir::ModuleOp"> {
+  let summary = "Poseidon CodeGen epilogue";
+}
+
 //------------------------------------------------------------------------------
 // Test Passes
 //------------------------------------------------------------------------------

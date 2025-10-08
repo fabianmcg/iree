@@ -67,6 +67,10 @@ void addGPUDefaultPassPipeline(OpPassManager &funcPassManager,
 /// Pass pipeline to lower IREE HAL executables without tiling and distribution.
 void addGPUBaseLoweringPassPipeline(OpPassManager &pm);
 
+/// Poseidon-specific pass pipeline for specialized lowering.
+void addGPUPoseidonPassPipeline(OpPassManager &funcPassManager,
+                                const GPUPipelineOptions &options);
+
 /// Populates the common passes needed to preprocess and select the translation
 /// strategy.
 void buildLLVMGPUCodegenCommonConfigurationPassPipeline(

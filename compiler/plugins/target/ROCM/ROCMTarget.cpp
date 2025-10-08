@@ -58,6 +58,7 @@
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/ROCDL/ROCDLToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Export.h"
+#include "poseidon/Init.h"
 
 namespace mlir::iree_compiler::IREE::HAL {
 
@@ -397,6 +398,7 @@ public:
     registry.insert<IREE::ROCM::ROCMDialect>();
     // Configuration may load and manipulate transform dialect libraries.
     registerTransformDialectTranslationDependentDialects(registry);
+    mlir::registerPoseidon(registry);
   }
 
   void

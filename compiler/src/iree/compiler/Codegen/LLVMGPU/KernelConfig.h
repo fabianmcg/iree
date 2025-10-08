@@ -13,5 +13,8 @@ namespace mlir::iree_compiler {
 
 LogicalResult initGPULaunchConfig(mlir::FunctionOpInterface funcOp);
 
+/// Returns whether to use Poseidon.
+bool usePoseidon();
+
 } // namespace mlir::iree_compiler
 #endif // IREE_COMPILER_CODEGEN_LLVMGPU_KERNELCONFIG_H_

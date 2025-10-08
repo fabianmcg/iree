@@ -911,6 +911,17 @@ else()
   endif()
 
   set(BUILD_SHARED_LIBS ${_IREE_ORIG_BUILD_SHARED_LIBS} CACHE BOOL "" FORCE)
+
+  set(POSEIDON_MIN_BUILD ON)
+  set(TRITON_BUILD_UT OFF)
+  set(MLIR_DIR ${MLIR_CMAKE_DIR})
+  set(LLVM_DIR ${LLVM_CMAKE_DIR})
+  set(TRITON_CODEGEN_BACKENDS amd nvidia)
+  iree_llvm_add_external_project(poseidon ${CMAKE_CURRENT_SOURCE_DIR}/poseidon)
+  include_directories(${PROJECT_SOURCE_DIR}/poseidon/include)
+  include_directories(${PROJECT_BINARY_DIR}/llvm-external-projects/poseidon/include)
+  include_directories(${PROJECT_SOURCE_DIR}/poseidon/triton/include)
+  include_directories(${PROJECT_BINARY_DIR}/llvm-external-projects/poseidon/triton/include)
 endif()
 
 #-------------------------------------------------------------------------------

@@ -137,6 +137,13 @@ static llvm::cl::opt<bool> clDirectConvolution(
     llvm::cl::desc("Use direct convolution in tile and fuse pipeline"),
     llvm::cl::init(false));
 
+llvm::cl::opt<bool> clGPUUsePoseidon(
+    "iree-codegen-poseidon",
+    llvm::cl::desc("enable the usage of the Poseidon pipeline"),
+    llvm::cl::init(false));
+
+bool usePoseidon() { return clGPUUsePoseidon; }
+
 namespace {
 
 using CodeGenPipeline = IREE::Codegen::DispatchLoweringPassPipeline;
@@ -169,7 +176,8 @@ static bool needsLoweringConfigPropagation(
   using Pipeline = IREE::Codegen::DispatchLoweringPassPipeline;
   // Pipelines that do not need propagation of lowering config.
   Pipeline supportedPipelines[] = {Pipeline::LLVMGPUTileAndFuse,
-                                   Pipeline::LLVMGPUVectorDistribute};
+                                   Pipeline::LLVMGPUVectorDistribute,
+                                   Pipeline::LLVMGPUPoseidon};
   return !llvm::is_contained(supportedPipelines, pipeline);
 }
 
@@ -892,10 +900,9 @@ static IREE::GPU::Basis projectBasis(const IREE::GPU::Basis &basis,
   return projectedBasis;
 }
 
-static LogicalResult
-setConvolutionVectorDistributionConfig(IREE::GPU::TargetAttr target,
-                                       mlir::FunctionOpInterface entryPoint,
-                                       linalg::LinalgOp op) {
+static LogicalResult setConvolutionVectorDistributionConfig(
+    IREE::GPU::TargetAttr target, mlir::FunctionOpInterface entryPoint,
+    linalg::LinalgOp op, IREE::Codegen::DispatchLoweringPassPipeline pipeline) {
   if (target.getWgp().getMma().empty())
     return failure();
 
@@ -1087,8 +1094,8 @@ setConvolutionVectorDistributionConfig(IREE::GPU::TargetAttr target,
   auto pipelineConfig = DictionaryAttr::get(context, pipelineAttrs);
 
   return setOpConfigAndEntryPointFnTranslation(
-      entryPoint, op, loweringConfig, CodeGenPipeline::LLVMGPUVectorDistribute,
-      workgroupSize, targetSubgroupSize, pipelineConfig);
+      entryPoint, op, loweringConfig, pipeline, workgroupSize,
+      targetSubgroupSize, pipelineConfig);
 }
 
 [[maybe_unused]] static void
@@ -1107,10 +1114,9 @@ debugPrintContractionInfo(StringRef label, unsigned numLoops,
   DBGS() << label << ": " << llvm::interleaved_array(sizes) << "\n";
 }
 
-static LogicalResult
-setMatmulVectorDistributionConfig(IREE::GPU::TargetAttr target,
-                                  mlir::FunctionOpInterface entryPoint,
-                                  linalg::LinalgOp op) {
+static LogicalResult setMatmulVectorDistributionConfig(
+    IREE::GPU::TargetAttr target, mlir::FunctionOpInterface entryPoint,
+    linalg::LinalgOp op, IREE::Codegen::DispatchLoweringPassPipeline pipeline) {
   if (target.getWgp().getMma().empty())
     return failure();
 
@@ -1222,10 +1228,10 @@ setMatmulVectorDistributionConfig(IREE::GPU::TargetAttr target,
     // and a larger bestKTileCountPerSubgroup.
     seeds = {/*bestSubgroupCountPerWorkgroup=*/4,
              /*bestMNTileCountPerSubgroup=*/4,
-             /*bestKTileCountPerSubgroup=*/8};
+             /*bestKTileCountPerSubgroup=*/4};
   } else {
     seeds = {/*bestSubgroupCountPerWorkgroup=*/4,
-             /*bestMNTileCountPerSubgroup=*/8,
+             /*bestMNTileCountPerSubgroup=*/4,
              /*bestKTileCountPerSubgroup=*/4};
   }
   // Scale the seed by number of contractions of horizontally fused case.
@@ -1234,8 +1240,6 @@ setMatmulVectorDistributionConfig(IREE::GPU::TargetAttr target,
   int64_t maxSharedMemoryBytes = target.getWgp().getMaxWorkgroupMemoryBytes();
 
   LDBG() << "Matmul Vector Distribution Config";
-
-  auto pipeline = CodeGenPipeline::LLVMGPUVectorDistribute;
 
   // Infer if lhs or rhs is transposed to help generate better schedule.
   SmallVector<AffineMap> maps = op.getIndexingMapsArray();
@@ -1366,7 +1370,8 @@ setAttentionPipelineAttributes(IREE::GPU::TargetAttr target,
 
 static LogicalResult setAttentionIntrinsicBasedVectorDistributionConfig(
     IREE::GPU::TargetAttr target, mlir::FunctionOpInterface entryPoint,
-    IREE::LinalgExt::AttentionOp op) {
+    IREE::LinalgExt::AttentionOp op,
+    IREE::Codegen::DispatchLoweringPassPipeline pipeline) {
   if (target.getWgp().getMma().empty())
     return failure();
 
@@ -1654,8 +1659,8 @@ static LogicalResult setAttentionIntrinsicBasedVectorDistributionConfig(
   op.setDecompositionConfigAttr(decompositionConfigDict);
 
   return setOpConfigAndEntryPointFnTranslation(
-      entryPoint, op, loweringConfig, CodeGenPipeline::LLVMGPUVectorDistribute,
-      workgroupSize, targetSubgroupSize, pipelineConfig);
+      entryPoint, op, loweringConfig, pipeline, workgroupSize,
+      targetSubgroupSize, pipelineConfig);
 }
 
 struct AttentionReductionHeuristicSeeds {
@@ -1668,7 +1673,8 @@ struct AttentionReductionHeuristicSeeds {
 
 static LogicalResult setAttentionReductionConfig(
     AttentionReductionHeuristicSeeds &seeds, IREE::GPU::TargetAttr target,
-    FunctionOpInterface entryPoint, IREE::LinalgExt::AttentionOp op) {
+    FunctionOpInterface entryPoint, IREE::LinalgExt::AttentionOp op,
+    IREE::Codegen::DispatchLoweringPassPipeline pipeline) {
 
   const int64_t targetSubgroupSize = target.getPreferredSubgroupSize();
 
@@ -1933,16 +1939,16 @@ static LogicalResult setAttentionReductionConfig(
   auto pipelineConfig = DictionaryAttr::get(context, pipelineAttrs);
 
   return setOpConfigAndEntryPointFnTranslation(
-      entryPoint, op, loweringConfig, CodeGenPipeline::LLVMGPUVectorDistribute,
-      workgroupSize, targetSubgroupSize, pipelineConfig);
+      entryPoint, op, loweringConfig, pipeline, workgroupSize,
+      targetSubgroupSize, pipelineConfig);
 
   return success();
 }
 
-static LogicalResult
-setAttentionVectorDistributionConfig(IREE::GPU::TargetAttr target,
-                                     FunctionOpInterface entryPoint,
-                                     IREE::LinalgExt::AttentionOp op) {
+static LogicalResult setAttentionVectorDistributionConfig(
+    IREE::GPU::TargetAttr target, FunctionOpInterface entryPoint,
+    IREE::LinalgExt::AttentionOp op,
+    IREE::Codegen::DispatchLoweringPassPipeline pipeline) {
 
   // This configuration is not really smart right now. It just makes sure that
   // attention always compiles and tries to distribute workload on threads,
@@ -1999,13 +2005,14 @@ setAttentionVectorDistributionConfig(IREE::GPU::TargetAttr target,
                                          /*keyVectorSize=*/keyVectorSize,
                                          /*valueVectorSize=*/valueVectorSize};
 
-  return setAttentionReductionConfig(seeds, target, entryPoint, op);
+  return setAttentionReductionConfig(seeds, target, entryPoint, op, pipeline);
 }
 
-static LogicalResult
-setVectorDistributionConfig(IREE::GPU::TargetAttr target,
-                            mlir::FunctionOpInterface entryPoint,
-                            Operation *computeOp) {
+static LogicalResult setVectorDistributionConfig(
+    IREE::GPU::TargetAttr target, mlir::FunctionOpInterface entryPoint,
+    Operation *computeOp,
+    IREE::Codegen::DispatchLoweringPassPipeline pipeline =
+        IREE::Codegen::DispatchLoweringPassPipeline::LLVMGPUVectorDistribute) {
   // We haven't properly plumbed through MMA op layouts and conversions for CUDA
   // to target NVIDIA GPUs. So disable the vector distribution pass for it.
   if (!isROCmBackend(target))
@@ -2023,23 +2030,25 @@ setVectorDistributionConfig(IREE::GPU::TargetAttr target,
         IREE::LinalgExt::isaHorizontallyFusedContraction(linalgOp)) {
       LDBG()
           << "VectorDistribution: trying to find a suitable contraction config";
-      return setMatmulVectorDistributionConfig(target, entryPoint, linalgOp);
+      return setMatmulVectorDistributionConfig(target, entryPoint, linalgOp,
+                                               pipeline);
     }
     if (linalg::isaConvolutionOpInterface(linalgOp)) {
       LDBG()
           << "VectorDistribution: trying to find a suitable convolution config";
       return setConvolutionVectorDistributionConfig(target, entryPoint,
-                                                    linalgOp);
+                                                    linalgOp, pipeline);
     }
   }
 
   if (auto attnOp = dyn_cast<IREE::LinalgExt::AttentionOp>(computeOp)) {
     LDBG() << "VectorDistribution: trying to find a suitable attention config";
     if (succeeded(setAttentionIntrinsicBasedVectorDistributionConfig(
-            target, entryPoint, attnOp))) {
+            target, entryPoint, attnOp, pipeline))) {
       return success();
     }
-    return setAttentionVectorDistributionConfig(target, entryPoint, attnOp);
+    return setAttentionVectorDistributionConfig(target, entryPoint, attnOp,
+                                                pipeline);
   }
 
   LDBG() << "VectorDistribution: failed to find a suitable config";
@@ -2867,6 +2876,15 @@ static LogicalResult setConvolutionConfig(
       entryPointFn, linalgOp, tileSizes, pipeline, workgroupSize);
 }
 
+static LogicalResult
+setPoseidonLoweringConfig(IREE::GPU::TargetAttr target,
+                          mlir::FunctionOpInterface entryPointFn,
+                          Operation *computeOp) {
+  return setVectorDistributionConfig(
+      target, entryPointFn, computeOp,
+      IREE::Codegen::DispatchLoweringPassPipeline::LLVMGPUPoseidon);
+}
+
 //====---------------------------------------------------------------------===//
 // Pipeline Configuration
 //====---------------------------------------------------------------------===//
@@ -2880,6 +2898,12 @@ static LogicalResult setRootConfig(IREE::GPU::TargetAttr target,
     computeOp->print(llvm::dbgs(), OpPrintingFlags().skipRegions());
     llvm::dbgs() << "\n";
   });
+
+  // Check for Poseidon pipeline first
+  if (clGPUUsePoseidon &&
+      succeeded(setPoseidonLoweringConfig(target, entryPointFn, computeOp))) {
+    return success();
+  }
   if (succeeded(setDataTiledMmaInnerTiledLoweringConfig(
           target, entryPointFn, computeOp, ukernelConfig))) {
     LDBG() << "Tile and fuse data tiled MMA inner_tiled config";

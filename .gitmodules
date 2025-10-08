@@ -40,3 +40,6 @@
 [submodule "third_party/hsa-runtime-headers"]
 	path = third_party/hsa-runtime-headers
 	url = https://github.com/iree-org/hsa-runtime-headers.git
+[submodule "poseidon"]
+	path = poseidon
+	url = git@github.com:fabianmcg/poseidon.git
