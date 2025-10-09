@@ -938,18 +938,33 @@ void addGPUBaseLoweringPassPipeline(OpPassManager &funcPassManager) {
 
 void addGPUPoseidonPassPipeline(OpPassManager &funcPassManager,
                                 const GPUPipelineOptions &options) {
+  funcPassManager.addPass(createGPUPadConvsPass());
+  if (options.useIgemmConvolution) {
+    funcPassManager.addPass(createConvolutionToIGEMMPass());
+  }
+
+  // TODO (nirvedhmeshram) : Can remove this pass after
+  // https://github.com/iree-org/iree/issues/19546 is fixed.
+  funcPassManager.addPass(createConvertAccGEMMToGEMMPass());
+
   ReorderWorkgroupsStrategy reorderStrategy =
       getReorderWorkgroupsStrategy(options.reorderStrategy);
 
   tileAndDistributeToWorkgroup(funcPassManager, /*useForall=*/true,
                                /*convertToDpsOptions=*/std::nullopt,
                                /*reorderStrategy=*/reorderStrategy);
-
   // Some of the elementwise fusion can benefit from this pass.
   funcPassManager.addPass(createRematerializeParallelOpsPass());
 
   funcPassManager.addPass(
       IREE::LinalgExt::createConvertAttentionToOnlineAttentionPass());
+
+  // Step 0. Apply any user annotated lowering strategies.
+  funcPassManager.addPass(createConfigTrackingCanonicalizerPass());
+  funcPassManager.addPass(createCSEPass());
+
+  // Step 1. Promote matmul operands and pack to intrinsic shapes.
+  funcPassManager.addPass(createGPUPadOperandsPass());
 
   funcPassManager.addPass(createConfigTrackingCanonicalizerPass());
   funcPassManager.addPass(createCSEPass());
@@ -987,7 +1002,6 @@ void addGPUPoseidonPassPipeline(OpPassManager &funcPassManager,
     funcPassManager.addPass(createConfigTrackingCanonicalizerPass());
     funcPassManager.addPass(createCSEPass());
   }
-
   funcPassManager.addPass(IREE::LinalgExt::createDecomposeAttentionPass());
   funcPassManager.addPass(createConfigTrackingCanonicalizerPass());
   funcPassManager.addPass(createCSEPass());
@@ -1026,6 +1040,9 @@ void addGPUPoseidonPassPipeline(OpPassManager &funcPassManager,
   // Linalg -> Vector
   funcPassManager.addPass(
       IREE::LinalgExt::createVectorizeIREELinalgExtOpsPass());
+  funcPassManager.addPass(createCSEPass());
+  funcPassManager.addPass(createCanonicalizerPass());
+  funcPassManager.addPass(createCSEPass());
   addGPUVectorizationPasses(funcPassManager, /*vectorizeCopies=*/true,
                             /*enableMasking=*/true);
 
@@ -1036,6 +1053,13 @@ void addGPUPoseidonPassPipeline(OpPassManager &funcPassManager,
   funcPassManager.addPass(createGPUCombineValueBarriersPass());
 
   // Tensor -> Memref
+  funcPassManager.addPass(createCSEPass());
+  funcPassManager.addPass(createCanonicalizerPass());
+  funcPassManager.addPass(createCSEPass());
+  funcPassManager.addPass(createOptimizeTensorInsertExtractSlicesPass());
+  funcPassManager.addPass(createCSEPass());
+  funcPassManager.addPass(createCanonicalizerPass());
+  funcPassManager.addPass(createCSEPass());
   addVectorBufferizePasses(funcPassManager, false);
   funcPassManager.addPass(createCanonicalizerPass());
   funcPassManager.addPass(createCSEPass());

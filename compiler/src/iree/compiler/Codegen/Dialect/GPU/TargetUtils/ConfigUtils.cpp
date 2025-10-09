@@ -338,7 +338,7 @@ static std::optional<GPUMMASchedule> getMmaScheduleFromProblemAndTarget(
     LDBG() << "This config is MediumGemm";
     if (isGemm) {
       seeds = {/*bestSubgroupCountPerWorkgroup=*/4,
-               /*bestMNTileCountPerSubgroup=*/8,
+               /*bestMNTileCountPerSubgroup=*/4,
                /*bestKTileCountPerSubgroup=*/4,
                /*bestKElementCountPerSubgroup*/ 2 * kCacheLineSizeBits /
                    inBitWidth};
@@ -633,14 +633,13 @@ getMatmulOrIGEMMLoweringConfigAndWorkgroupSize(
   // for tranpose_b layouts as thats where we currently dont have any overhead
   // for padding. Other layouts still can have overhead and once we fix the root
   // causes for that we can relax this condition.
-  GPUMatmulShapeType problem{
-      getDimBounds(mDims, transposedLhs || !transposedRhs),
-      getDimBounds(nDims, transposedLhs || !transposedRhs),
-      getDimBoundsNoPad(kDims),
-      getDimBoundsNoPad(batchDims),
-      lhsElemType,
-      rhsElemType,
-      initElemType};
+  GPUMatmulShapeType problem{getDimBounds(mDims, false),
+                             getDimBounds(nDims, false),
+                             getDimBounds(kDims, false),
+                             getDimBoundsNoPad(batchDims),
+                             lhsElemType,
+                             rhsElemType,
+                             initElemType};
 
   bool mustBeAligned = true;
   std::optional<GPUMMASchedule> schedule = getMmaScheduleFromProblemAndTarget(
@@ -876,9 +875,11 @@ LogicalResult setIGEMMConvolutionLoweringConfig(
       workgroupSize, targetSubgroupSize, pipelineConfig);
 }
 
-LogicalResult setMatmulLoweringConfig(IREE::GPU::TargetAttr target,
-                                      mlir::FunctionOpInterface entryPoint,
-                                      Operation *op, bool useDirectLoad) {
+LogicalResult
+setMatmulLoweringConfig(IREE::GPU::TargetAttr target,
+                        mlir::FunctionOpInterface entryPoint, Operation *op,
+                        bool useDirectLoad,
+                        IREE::Codegen::DispatchLoweringPassPipeline pipeline) {
   auto linalgOp = dyn_cast<linalg::LinalgOp>(op);
   if (!linalgOp ||
       (!linalg::isaContractionOpInterface(linalgOp) &&
@@ -930,9 +931,8 @@ LogicalResult setMatmulLoweringConfig(IREE::GPU::TargetAttr target,
 
   // TODO(qedawkins): Use a shared pipeline identifier here.
   return setOpConfigAndEntryPointFnTranslation(
-      entryPoint, op, loweringConfig,
-      IREE::Codegen::DispatchLoweringPassPipeline::LLVMGPUTileAndFuse,
-      workgroupSize, targetSubgroupSize, pipelineConfig);
+      entryPoint, op, loweringConfig, pipeline, workgroupSize,
+      targetSubgroupSize, pipelineConfig);
 }
 
 /// Helper to identify contraction like operations for operand promotiong.
@@ -1088,9 +1088,9 @@ static FailureOr<DistributionInfo> collectOpDistributionInfo(Operation *op) {
   return distInfo;
 };
 
-LogicalResult setTileAndFuseLoweringConfig(IREE::GPU::TargetAttr target,
-                                           mlir::FunctionOpInterface entryPoint,
-                                           Operation *op) {
+LogicalResult setTileAndFuseLoweringConfig(
+    IREE::GPU::TargetAttr target, mlir::FunctionOpInterface entryPoint,
+    Operation *op, IREE::Codegen::DispatchLoweringPassPipeline pipeline) {
   FailureOr<DistributionInfo> maybeDistInfo = collectOpDistributionInfo(op);
   if (failed(maybeDistInfo)) {
     return failure();
@@ -1368,9 +1368,8 @@ LogicalResult setTileAndFuseLoweringConfig(IREE::GPU::TargetAttr target,
 
   // TODO(qedawkins): Use a shared pipeline identifier here.
   return setOpConfigAndEntryPointFnTranslation(
-      entryPoint, op, loweringConfig,
-      IREE::Codegen::DispatchLoweringPassPipeline::LLVMGPUTileAndFuse,
-      {flatWorkgroupSize, 1, 1}, subgroupSize, DictionaryAttr());
+      entryPoint, op, loweringConfig, pipeline, {flatWorkgroupSize, 1, 1},
+      subgroupSize, DictionaryAttr());
 }
 
 LogicalResult setScatterLoweringConfig(IREE::GPU::TargetAttr target,

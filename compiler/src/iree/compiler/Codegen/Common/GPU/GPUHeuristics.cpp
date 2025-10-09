@@ -286,11 +286,14 @@ getBestKTileSizes(const GPUMatmulShapeType &problem,
   // 16x16x16 intrinsic, then:
   //  - kTotalTileCounts would be 3 * (128/16) = 24
   SmallVector<int64_t, 2> kTotalTileCounts = problem.kSizes;
+  LDBG() << "K tile counts: " << llvm::interleaved_array(kTotalTileCounts);
   for (auto [kTotalTileCount, intrinsicKSize] : llvm::zip_equal(
            MutableArrayRef{kTotalTileCounts}.take_back(intrinsic.kSizes.size()),
            intrinsic.kSizes)) {
     kTotalTileCount = llvm::divideCeil(kTotalTileCount, intrinsicKSize);
   }
+  LDBG() << "K tile counts update: "
+         << llvm::interleaved_array(kTotalTileCounts);
 
   // Compute the ideal number of intrinsics along K per subgroup based on the
   // seed.
@@ -299,6 +302,8 @@ getBestKTileSizes(const GPUMatmulShapeType &problem,
           ? llvm::divideCeil(seeds.bestKElementCountPerSubgroup,
                              intrinsic.kSizes[0])
           : seeds.bestKTileCountPerSubgroup;
+  // bestKTileCountPerSubgroup = 64;
+  LDBG() << "bestKTileCountPerSubgroup: " << bestKTileCountPerSubgroup;
   SmallVector<int64_t> kTileSizes(problem.kSizes.size(), 0);
   // Start at the innermost K dim, and tile each dim to try to satisfy the ideal
   // K intrinsic count per subgroup with the overall product of K tile counts.
@@ -310,6 +315,7 @@ getBestKTileSizes(const GPUMatmulShapeType &problem,
     bestKTileCountPerSubgroup /= kTileSizes[kDim];
     --kDim;
   }
+  LDBG() << "K tile sizes: " << llvm::interleaved_array(kTileSizes);
 
   return kTileSizes;
 }

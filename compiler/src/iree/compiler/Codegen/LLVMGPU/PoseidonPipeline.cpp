@@ -169,8 +169,8 @@ static FailureOr<int64_t> setWorkgroupCount(ModuleOp mod) {
 struct PoseidonPipeline final : impl::PoseidonPipelineBase<PoseidonPipeline> {
   using Base::Base;
 
-  LogicalResult runToTTIR(ModuleOp mod, IREEConf &conf,
-                          int64_t countWorkgroups) {
+  LogicalResult legalizeVector(ModuleOp mod, IREEConf &conf,
+                               int64_t countWorkgroups) {
     OpPassManager modulePassManager("builtin.module");
     modulePassManager.addPass(createPoseidonOutlineForall());
     OpPassManager &ttPm = modulePassManager.nest<ModuleOp>();
@@ -192,6 +192,13 @@ struct PoseidonPipeline final : impl::PoseidonPipelineBase<PoseidonPipeline> {
     ttPm.addPass(createCanonicalizerPass());
     ttPm.addPass(createCSEPass());
     ttPm.nest<func::FuncOp>().addPass(poseidon::createSimplifyVectorOps());
+    return runPipeline(modulePassManager, mod);
+  }
+
+  LogicalResult runToTTIR(ModuleOp mod, IREEConf &conf,
+                          int64_t countWorkgroups) {
+    OpPassManager modulePassManager("builtin.module");
+    OpPassManager &ttPm = modulePassManager.nest<ModuleOp>();
     ttPm.addPass(poseidon::createConvertToTriton({clIndexingBits == 32}));
     OpPassManager &ttirFnPm = ttPm.nest<triton::FuncOp>();
     ttirFnPm.addPass(createCanonicalizerPass());
@@ -199,6 +206,17 @@ struct PoseidonPipeline final : impl::PoseidonPipelineBase<PoseidonPipeline> {
     ttirFnPm.addPass(createLoopInvariantCodeMotionPass());
     ttirFnPm.addPass(createCanonicalizerPass());
     ttirFnPm.addPass(createCSEPass());
+    ttirFnPm.addPass(poseidon::createOptimizeTriton());
+    ttirFnPm.addPass(createCanonicalizerPass());
+    ttirFnPm.addPass(createCSEPass());
+    return runPipeline(modulePassManager, mod);
+  }
+
+  LogicalResult runPIRToTTIR(ModuleOp mod, IREEConf &conf,
+                             int64_t countWorkgroups) {
+    OpPassManager modulePassManager("builtin.module");
+    OpPassManager &ttPm = modulePassManager.nest<ModuleOp>();
+    OpPassManager &ttirFnPm = ttPm.nest<triton::FuncOp>();
     ttirFnPm.addPass(poseidon::createPoseidonToTriton());
     ttirFnPm.addPass(createCanonicalizerPass());
     ttirFnPm.addPass(createCSEPass());
@@ -251,22 +269,42 @@ struct PoseidonPipeline final : impl::PoseidonPipelineBase<PoseidonPipeline> {
       return;
     LDBG() << "Input module:\n" << mod;
     FailureOr<int64_t> countWorkgroups = setWorkgroupCount(mod);
-    if (failed(countWorkgroups))
+    if (failed(countWorkgroups)) {
+      LDBG() << "Pipeline failed when setting the workgroup count";
       return signalPassFailure();
+    }
 
     IREEConf conf;
-    if (failed(conf.init(mod)))
+    if (failed(conf.init(mod))) {
+      LDBG() << "Pipeline failed when obtaining the configuration";
       return signalPassFailure();
+    }
 
-    if (failed(runToTTIR(mod, conf, *countWorkgroups)))
+    if (failed(legalizeVector(mod, conf, *countWorkgroups))) {
+      LDBG() << "Pipeline failed when legalizing vector";
       return signalPassFailure();
+    }
 
-    LDBG() << "ToTTIR:\n" << mod;
+    LDBG(2) << "Legalize vector:\n" << mod;
+
+    if (failed(runToTTIR(mod, conf, *countWorkgroups))) {
+      LDBG() << "Pipeline failed when converting to ttir";
+      return signalPassFailure();
+    }
+
+    LDBG(2) << "To mixed TTIR:\n" << mod;
+
+    if (failed(runPIRToTTIR(mod, conf, *countWorkgroups))) {
+      LDBG() << "Pipeline failed when converting pir to ttir";
+      return signalPassFailure();
+    }
+
+    LDBG() << "PIR To TTIR:\n" << mod;
 
     if (failed(runTTIR(mod, conf)))
       return signalPassFailure();
 
-    LDBG(2) << "Output module:\n" << mod;
+    LDBG(3) << "Output module:\n" << mod;
   }
 };
 } // namespace

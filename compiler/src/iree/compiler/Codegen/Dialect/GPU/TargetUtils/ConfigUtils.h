@@ -38,16 +38,19 @@ LogicalResult setIGEMMConvolutionLoweringConfig(
 /// Helper for setting up a matmul config based on the specified target.
 /// TODO: Currently this only succeeds if the target supports an mma
 /// kind. Add support for a fallback direct lowering path.
-LogicalResult setMatmulLoweringConfig(IREE::GPU::TargetAttr target,
-                                      mlir::FunctionOpInterface entryPoint,
-                                      Operation *op,
-                                      bool useDirectLoad = false);
+LogicalResult setMatmulLoweringConfig(
+    IREE::GPU::TargetAttr target, mlir::FunctionOpInterface entryPoint,
+    Operation *op, bool useDirectLoad = false,
+    IREE::Codegen::DispatchLoweringPassPipeline pipeline =
+        IREE::Codegen::DispatchLoweringPassPipeline::LLVMGPUTileAndFuse);
 
 /// Helper for setting up a default tile and fuse config for targeting
 /// simple thread distribution. Currently restricted to linalg ops.
-LogicalResult setTileAndFuseLoweringConfig(IREE::GPU::TargetAttr target,
-                                           mlir::FunctionOpInterface entryPoint,
-                                           Operation *op);
+LogicalResult setTileAndFuseLoweringConfig(
+    IREE::GPU::TargetAttr target, mlir::FunctionOpInterface entryPoint,
+    Operation *op,
+    IREE::Codegen::DispatchLoweringPassPipeline pipeline =
+        IREE::Codegen::DispatchLoweringPassPipeline::LLVMGPUTileAndFuse);
 
 // Helper for setting tile sizes for scatter.
 LogicalResult setScatterLoweringConfig(IREE::GPU::TargetAttr target,

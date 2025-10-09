@@ -48,7 +48,7 @@
 #include "mlir/IR/Value.h"
 
 #define DEBUG_TYPE "iree-llvmgpu-kernel-config"
-#define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
+
 namespace mlir::iree_compiler {
 
 llvm::cl::opt<bool> clGPUUseTileAndFuseMatmul(
@@ -1110,8 +1110,8 @@ debugPrintContractionInfo(StringRef label, unsigned numLoops,
       if (llvm::is_contained(dim, idx))
         val = letter;
   }
-  DBGS() << "Contraction dims: " << llvm::interleaved_array(dimSymbols) << "\n";
-  DBGS() << label << ": " << llvm::interleaved_array(sizes) << "\n";
+  LDBG() << "Contraction dims: " << llvm::interleaved_array(dimSymbols) << "\n";
+  LDBG() << label << ": " << llvm::interleaved_array(sizes) << "\n";
 }
 
 static LogicalResult setMatmulVectorDistributionConfig(
@@ -1160,11 +1160,13 @@ static LogicalResult setMatmulVectorDistributionConfig(
   if (ShapedType::isDynamic(bounds[mDim]) ||
       ShapedType::isDynamic(bounds[nDim]) ||
       ShapedType::isDynamic(bounds[kDim])) {
+    LDBG() << "[VecDist GEMM] Failure, there are dynamic dims";
     return failure();
   }
 
   // Bail out on matvec-like cases.
   if (bounds[mDim] == 1 || bounds[nDim] == 1) {
+    LDBG() << "[VecDist GEMM] Failure, mat-vec";
     return failure();
   }
 
@@ -1213,8 +1215,10 @@ static LogicalResult setMatmulVectorDistributionConfig(
     // Skip adding any virtual intrinsics since they are not tested for matmuls.
   }
 
-  if (intrinsics.empty())
+  if (intrinsics.empty()) {
+    LDBG() << "[VecDist GEMM] Failure, no intrinsics";
     return failure();
+  }
 
   GPUMMAHeuristicSeeds seeds;
 
@@ -2876,11 +2880,97 @@ static LogicalResult setConvolutionConfig(
       entryPointFn, linalgOp, tileSizes, pipeline, workgroupSize);
 }
 
+static void setPoseidonParallelConfig(ArrayRef<int64_t> sizes,
+                                      MutableArrayRef<int64_t> workgroup,
+                                      MutableArrayRef<int64_t> padding,
+                                      MutableArrayRef<int64_t> workgroupSize) {
+  return;
+  return;
+}
+
+static void setPoseidonContractionConfig(
+    ArrayRef<int64_t> sizes, MutableArrayRef<int64_t> workgroup,
+    MutableArrayRef<int64_t> padding, MutableArrayRef<int64_t> reduction,
+    MutableArrayRef<int64_t> workgroupSize,
+    linalg::ContractionDimensions &contractionDims) {
+  workgroupSize[0] = 256;
+  padding[0] = 64;
+  padding[1] = 64;
+  padding[2] = 64;
+  reduction[2] = 64;
+  workgroup[0] = 64;
+  workgroup[1] = 64;
+  workgroup[2] = 64;
+}
+
+static LogicalResult
+setTrivialPoseidonLoweringConfig(IREE::GPU::TargetAttr target,
+                                 mlir::FunctionOpInterface entryPointFn,
+                                 Operation *computeOp) {
+  auto linalgOp = dyn_cast<linalg::LinalgOp>(computeOp);
+  if (!linalgOp)
+    return failure();
+
+  // Bail if there's more than one reduction.
+  SmallVector<unsigned> reductionDims;
+  linalgOp.getReductionDims(reductionDims);
+  if (reductionDims.size() > 1)
+    return failure();
+
+  // Get the parallel dims.
+  SmallVector<unsigned> parallelDims;
+  linalgOp.getParallelDims(parallelDims);
+  SmallVector<int64_t> sizes = linalgOp.getStaticLoopRanges();
+  if (sizes.size() != parallelDims.size() + reductionDims.size())
+    return failure();
+
+  SmallVector<int64_t, 3> workgroupSize(3, 1);
+  SmallVector<int64_t> workgroup(sizes.size(), 1), reduction(sizes.size(), 0),
+      padding(sizes.size(), 0);
+
+  if (reductionDims.size() == 0) {
+    setPoseidonParallelConfig(sizes, workgroup, padding, workgroupSize);
+  } else {
+    FailureOr<linalg::ContractionDimensions> contractionDims =
+        linalg::inferContractionDims(linalgOp);
+    if (failed(contractionDims))
+      return failure();
+    setPoseidonContractionConfig(sizes, workgroup, padding, reduction,
+                                 workgroupSize, *contractionDims);
+  }
+
+  SmallVector<NamedAttribute> attrs;
+  MLIRContext *context = target.getContext();
+  Builder b(context);
+  attrs.emplace_back(StringAttr::get(context, "workgroup"),
+                     b.getI64ArrayAttr(workgroup));
+  attrs.emplace_back(StringAttr::get(context, "reduction"),
+                     b.getI64ArrayAttr(reduction));
+  attrs.emplace_back(StringAttr::get(context, "padding"),
+                     b.getI64ArrayAttr(padding));
+  return setOpConfigAndEntryPointFnTranslation(
+      entryPointFn, linalgOp,
+      IREE::GPU::LoweringConfigAttr::get(context, b.getDictionaryAttr(attrs)),
+      IREE::Codegen::DispatchLoweringPassPipeline::LLVMGPUPoseidon,
+      workgroupSize, 64);
+}
+
 static LogicalResult
 setPoseidonLoweringConfig(IREE::GPU::TargetAttr target,
                           mlir::FunctionOpInterface entryPointFn,
                           Operation *computeOp) {
-  return setVectorDistributionConfig(
+  if (succeeded(
+          setTrivialPoseidonLoweringConfig(target, entryPointFn, computeOp)))
+    return success();
+  if (succeeded(setVectorDistributionConfig(
+          target, entryPointFn, computeOp,
+          IREE::Codegen::DispatchLoweringPassPipeline::LLVMGPUPoseidon)))
+    return success();
+  if (succeeded(IREE::GPU::setMatmulLoweringConfig(
+          target, entryPointFn, computeOp, clUseDirectLoad,
+          IREE::Codegen::DispatchLoweringPassPipeline::LLVMGPUPoseidon)))
+    return success();
+  return IREE::GPU::setTileAndFuseLoweringConfig(
       target, entryPointFn, computeOp,
       IREE::Codegen::DispatchLoweringPassPipeline::LLVMGPUPoseidon);
 }
@@ -2894,7 +2984,7 @@ static LogicalResult setRootConfig(IREE::GPU::TargetAttr target,
                                    Operation *computeOp) {
   IREE::Codegen::UKernelDescriptorAttr ukernelConfig = selectUKernel(computeOp);
   LLVM_DEBUG({
-    DBGS() << "Selecting root config for: ";
+    LDBG() << "Selecting root config for: ";
     computeOp->print(llvm::dbgs(), OpPrintingFlags().skipRegions());
     llvm::dbgs() << "\n";
   });

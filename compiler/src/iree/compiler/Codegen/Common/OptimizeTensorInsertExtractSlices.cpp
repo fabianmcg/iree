@@ -343,6 +343,50 @@ struct FoldMaskedTransferRAW : OpRewritePattern<vector::TransferReadOp> {
     return success();
   }
 };
+
+struct SetWriteMask : OpRewritePattern<vector::TransferWriteOp> {
+  using Base::Base;
+
+  LogicalResult matchAndRewrite(vector::TransferWriteOp op,
+                                PatternRewriter &rewriter) const override {
+    // Fail to match if the read doesn't have pure tensor semantics.
+    if (!op.hasPureTensorSemantics()) {
+      return failure();
+    }
+
+    // Work only with minor identity mappings.
+    if (!op.getPermutationMap().isMinorIdentity()) {
+      return failure();
+    }
+
+    // If already masked or in-bounds ignore.
+    if (op.getMask() != nullptr ||
+        llvm::all_of(op.getInBoundsValues(), [](bool v) { return v; })) {
+      return failure();
+    }
+
+    // Simplify only if working on empty tensors.
+    auto eOp = dyn_cast<tensor::EmptyOp>(op.getBase().getDefiningOp());
+    if (!eOp) {
+      return failure();
+    }
+
+    SmallVector<OpFoldResult> sizes =
+        tensor::getMixedSizes(rewriter, eOp.getLoc(), eOp.getResult());
+    auto mask = vector::CreateMaskOp::create(
+        rewriter, eOp.getLoc(),
+        VectorType::get(cast<ShapedType>(op.getValue().getType()).getShape(),
+                        rewriter.getI1Type()),
+        sizes);
+
+    rewriter.modifyOpInPlace(op, [&]() {
+      op.getMaskMutable().assign(mask);
+      op.setInBoundsAttr(rewriter.getArrayAttr(SmallVector<Attribute>(
+          op.getTransferRank(), rewriter.getBoolAttr(true))));
+    });
+    return success();
+  }
+};
 } // namespace
 
 // Find the earliest insertion point in the block for the given operation.
@@ -407,7 +451,7 @@ void OptimizeTensorInsertExtractSlicesPass::runOnOperation() {
   // Apply masked transfer_write + transfer_read folding to avoid spurious
   // (future) roundtrips to memory.
   // TODO: consider upstreaming.
-  patterns.add<FoldMaskedTransferRAW>(context);
+  patterns.add<FoldMaskedTransferRAW, SetWriteMask>(context);
   if (failed(applyPatternsGreedily(funcOp, std::move(patterns)))) {
     return signalPassFailure();
   }
