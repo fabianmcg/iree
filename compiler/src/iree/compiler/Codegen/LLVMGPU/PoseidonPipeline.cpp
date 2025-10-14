@@ -49,7 +49,7 @@ static llvm::cl::opt<int> clMatrixInstrNonKDim(
 static llvm::cl::opt<int>
     clKpack("iree-poseidon-kpack",
             llvm::cl::desc("K-dimension packing factor for matrix operations."),
-            llvm::cl::init(4));
+            llvm::cl::init(1));
 
 static llvm::cl::opt<std::string>
     clScheduleHint("iree-poseidon-schedule-hint",
@@ -206,7 +206,7 @@ struct PoseidonPipeline final : impl::PoseidonPipelineBase<PoseidonPipeline> {
     ttirFnPm.addPass(createLoopInvariantCodeMotionPass());
     ttirFnPm.addPass(createCanonicalizerPass());
     ttirFnPm.addPass(createCSEPass());
-    ttirFnPm.addPass(poseidon::createOptimizeTriton());
+    // ttirFnPm.addPass(poseidon::createOptimizeTriton());
     ttirFnPm.addPass(createCanonicalizerPass());
     ttirFnPm.addPass(createCSEPass());
     return runPipeline(modulePassManager, mod);
@@ -228,7 +228,6 @@ struct PoseidonPipeline final : impl::PoseidonPipelineBase<PoseidonPipeline> {
 
   LogicalResult runTTIR(ModuleOp mod, IREEConf &conf) {
     OpPassManager modulePassManager("builtin.module");
-    modulePassManager.addPass(createPoseidonOutlineForall());
     OpPassManager &ttPm = modulePassManager.nest<ModuleOp>();
     triton::populateTritonToTTIR(ttPm);
     triton::populateTritonToTTGIR(
@@ -245,6 +244,12 @@ struct PoseidonPipeline final : impl::PoseidonPipelineBase<PoseidonPipeline> {
         /*useBufferAtomics=*/clUseBufferAtomics,
         /*useBlockPingpong=*/clUseBlockPingpong,
         /*isInThreadTransposeEnabled=*/clIsInThreadTransposeEnabled);
+    return runPipeline(modulePassManager, mod);
+  }
+
+  LogicalResult runToLLVM(ModuleOp mod, IREEConf &conf) {
+    OpPassManager modulePassManager("builtin.module");
+    OpPassManager &ttPm = modulePassManager.nest<ModuleOp>();
     triton::populateTritonToLLVM(ttPm, /*arch=*/conf.chip,
                                  /*numStages=*/clNumStages,
                                  /*scheduleHint=*/clScheduleHint,
@@ -304,7 +309,12 @@ struct PoseidonPipeline final : impl::PoseidonPipelineBase<PoseidonPipeline> {
     if (failed(runTTIR(mod, conf)))
       return signalPassFailure();
 
-    LDBG(3) << "Output module:\n" << mod;
+    LDBG(3) << "TTGIR module:\n" << mod;
+
+    if (failed(runToLLVM(mod, conf)))
+      return signalPassFailure();
+
+    LDBG(4) << "Output module:\n" << mod;
   }
 };
 } // namespace

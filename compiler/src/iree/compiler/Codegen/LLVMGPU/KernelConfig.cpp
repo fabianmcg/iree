@@ -1235,7 +1235,7 @@ static LogicalResult setMatmulVectorDistributionConfig(
              /*bestKTileCountPerSubgroup=*/4};
   } else {
     seeds = {/*bestSubgroupCountPerWorkgroup=*/4,
-             /*bestMNTileCountPerSubgroup=*/4,
+             /*bestMNTileCountPerSubgroup=*/8,
              /*bestKTileCountPerSubgroup=*/4};
   }
   // Scale the seed by number of contractions of horizontally fused case.
