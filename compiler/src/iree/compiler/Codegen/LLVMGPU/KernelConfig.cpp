@@ -1499,7 +1499,7 @@ static LogicalResult setAttentionIntrinsicBasedVectorDistributionConfig(
                               /*accType=*/f32Type};
 
   GPUMMAHeuristicSeeds pvMatmulSeeds = {/*bestSubgroupCountPerWorkgroup=*/4,
-                                        /*bestMNTileCountPerSubgroup=*/4,
+                                        /*bestMNTileCountPerSubgroup=*/8,
                                         /*bestKTileCountPerSubgroup=*/4};
 
   LDBG() << "Attention Vector Distribution Config";
@@ -2898,8 +2898,8 @@ static void setPoseidonContractionConfig(
   padding[1] = 64;
   padding[2] = 64;
   reduction[2] = 64;
-  workgroup[0] = 64;
-  workgroup[1] = 64;
+  workgroup[0] = 128;
+  workgroup[1] = 128;
   workgroup[2] = 64;
 }
 
@@ -2946,8 +2946,8 @@ setTrivialPoseidonLoweringConfig(IREE::GPU::TargetAttr target,
                      b.getI64ArrayAttr(workgroup));
   attrs.emplace_back(StringAttr::get(context, "reduction"),
                      b.getI64ArrayAttr(reduction));
-  attrs.emplace_back(StringAttr::get(context, "padding"),
-                     b.getI64ArrayAttr(padding));
+  // attrs.emplace_back(StringAttr::get(context, "padding"),
+  //                    b.getI64ArrayAttr(padding));
   return setOpConfigAndEntryPointFnTranslation(
       entryPointFn, linalgOp,
       IREE::GPU::LoweringConfigAttr::get(context, b.getDictionaryAttr(attrs)),
@@ -2959,9 +2959,9 @@ static LogicalResult
 setPoseidonLoweringConfig(IREE::GPU::TargetAttr target,
                           mlir::FunctionOpInterface entryPointFn,
                           Operation *computeOp) {
-  if (succeeded(
-          setTrivialPoseidonLoweringConfig(target, entryPointFn, computeOp)))
-    return success();
+  // if (succeeded(
+  //         setTrivialPoseidonLoweringConfig(target, entryPointFn, computeOp)))
+  //   return success();
   if (succeeded(setVectorDistributionConfig(
           target, entryPointFn, computeOp,
           IREE::Codegen::DispatchLoweringPassPipeline::LLVMGPUPoseidon)))

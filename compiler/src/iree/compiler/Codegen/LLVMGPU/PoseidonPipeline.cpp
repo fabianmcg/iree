@@ -19,6 +19,7 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "iree/compiler/Dialect/Util/Transforms/Passes.h"
 #include "mlir/Transforms/Passes.h"
 #include "poseidon/Dialect/Poseidon/IR/PoseidonOps.h"
 #include "poseidon/Transforms/Passes.h"
@@ -172,6 +173,8 @@ struct PoseidonPipeline final : impl::PoseidonPipelineBase<PoseidonPipeline> {
   LogicalResult legalizeVector(ModuleOp mod, IREEConf &conf,
                                int64_t countWorkgroups) {
     OpPassManager modulePassManager("builtin.module");
+    modulePassManager.addPass(IREE::Util::createOptimizeIntArithmeticPass(
+            IREE::Util::OptimizeIntArithmeticPassOptions{/*narrowToI32=*/false}));
     modulePassManager.addPass(createPoseidonOutlineForall());
     OpPassManager &ttPm = modulePassManager.nest<ModuleOp>();
     OpPassManager &ttFnPm = ttPm.nest<func::FuncOp>();
@@ -251,7 +254,7 @@ struct PoseidonPipeline final : impl::PoseidonPipelineBase<PoseidonPipeline> {
     OpPassManager modulePassManager("builtin.module");
     OpPassManager &ttPm = modulePassManager.nest<ModuleOp>();
     triton::populateTritonToLLVM(ttPm, /*arch=*/conf.chip,
-                                 /*numStages=*/clNumStages,
+                                 /*numStages=*/2,
                                  /*scheduleHint=*/clScheduleHint,
                                  /*disableLineInfo=*/true,
                                  /*hipFTZ=*/clHipFTZ);

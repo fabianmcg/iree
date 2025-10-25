@@ -128,23 +128,26 @@ struct PoseidonInlineKernel final
     mlir::LLVMTypeConverter converter(&getContext(), opts);
     std::optional<StringRef> modName = kernelMod.getName();
     SymbolTable symbolTable(kernelMod);
+    SymbolTable modSymbolTable(mod);
     assert(modName && "Expected module name");
     for (Operation &op :
          llvm::make_early_inc_range(kernelMod.getBody()->getOperations())) {
       auto symbol = dyn_cast<SymbolOpInterface>(op);
       assert(symbol && "Expected SymbolOpInterface");
-      if (auto fnOp = dyn_cast<LLVM::LLVMFuncOp>(op)) {
-        fnOp->removeAttr("nvvm.kernel");
-        fnOp->removeAttr("nvvm.reqntid");
-        fnOp.setAlwaysInline(true);
-        symbol.setVisibility(SymbolTable::Visibility::Private);
-      }
       if (symbol.getName() == "global_smem") {
         auto op = handleSharedMem(symbolTable, cast<LLVM::GlobalOp>(symbol),
                                   rewriter, converter);
         if (!op)
           continue;
         symbol = op;
+      }
+      if (auto fnOp = dyn_cast<LLVM::LLVMFuncOp>(op)) {
+        if (fnOp.isExternal())
+          continue;
+        fnOp->removeAttr("nvvm.kernel");
+        fnOp->removeAttr("nvvm.reqntid");
+        fnOp.setAlwaysInline(true);
+        symbol.setVisibility(SymbolTable::Visibility::Private);
       }
       if (failed(symbolTable.rename(
               symbol, (*modName + "$_" + symbol.getName()).str())))
@@ -154,6 +157,8 @@ struct PoseidonInlineKernel final
          llvm::make_early_inc_range(kernelMod.getBody()->getOperations())) {
       auto symbol = dyn_cast<SymbolOpInterface>(op);
       assert(symbol && "Expected SymbolOpInterface");
+      if (modSymbolTable.lookup(symbol.getName()))
+        return signalPassFailure();
       rewriter.moveOpBefore(&op, kernelMod);
     }
     mod.walk(
